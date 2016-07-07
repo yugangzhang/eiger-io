@@ -17,12 +17,12 @@ from pims import FramesSequence, Frame
 
 class EigerImages(FramesSequence):
     pattern = re.compile('(.*)master.*')    
-    def __init__(self, master_filepath):
+    def __init__(self, master_filepath, metadata):
         # The 'master' file points to data in other files.
         # Construct a list of those filepaths and check that they exist.
         self.master_filepath = master_filepath
+        self._metadata = metadata
 
-        
         ndatafiles = 0
         m = self.pattern.match(os.path.basename(master_filepath))
         
@@ -38,14 +38,14 @@ class EigerImages(FramesSequence):
             if pattern_data in  files:
                 ndatafiles +=1
         
-        with h5py.File(master_filepath) as f:
-            try:
-                entry = f['entry']['data']  # Eiger firmware v1.3.0 and onwards
-            except KeyError:
-                entry = f['entry']          # Older firmwares
-            self.keys = sorted([k for k in entry.keys() if k.startswith('data')])[:ndatafiles]
+        f=h5py.File(master_filepath)
+        try:
+            entry = f['entry']['data']  # Eiger firmware v1.3.0 and onwards
+        except KeyError:
+            entry = f['entry']          # Older firmwares
+        self.keys = sorted([k for k in entry.keys() if k.startswith('data')])[:ndatafiles]
 
-            lengths = [entry[key].shape[0] for key in self.keys]
+        lengths = [entry[key].shape[0] for key in self.keys]
         for k in self.keys:
             filename = prefix + k + '.h5'
             filepath = os.path.join(os.path.dirname(master_filepath), filename)
@@ -55,18 +55,18 @@ class EigerImages(FramesSequence):
         # Table of Contents return a tuple:
         # self._toc[5] -> [which file, which element in that file]
         self._toc = np.concatenate(
-                 [ list(zip(i*np.ones(length, dtype=int),
-                     np.arange(length, dtype=int)))
-                for i, length in enumerate(lengths) ]   ) ##modify here, add list()
+                 [list(zip(i*np.ones(length, dtype=int),
+                           np.arange(length, dtype=int)))
+                  for i, length in enumerate(lengths) ])
+        self.masterfid=f
 
     def get_frame(self, i):
         key_number, elem_number = self._toc[i]
         key = self.keys[key_number]
-        with h5py.File(self.master_filepath) as f:
-            try:
-                img = f['entry']['data'][key][elem_number]  # Eiger firmware v1.3.0 and onwards
-            except KeyError:
-                img = f['entry'][key][elem_number]          # Older firmwares
+        try:
+    	    img = self.masterfid['entry']['data'][key][elem_number]  # Eiger firmware v1.3.0 and onwards
+        except KeyError:
+            img = self.masterfid['entry'][key][elem_number]          # Older firmwares
         return Frame(img, frame_no=i)
 
     def __len__(self):
@@ -79,3 +79,15 @@ class EigerImages(FramesSequence):
     @property
     def pixel_type(self):
         return self[0].dtype
+
+    @property
+    def md(self):
+        return self._metadata
+
+    @property
+    def dtype(self):
+        return self.pixel_type
+
+    @property
+    def shape(self):
+        return self.frame_shape
